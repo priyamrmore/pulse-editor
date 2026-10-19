@@ -30,6 +30,10 @@ namespace margelo::nitro::pulseeditor { struct Thumbnail; }
 namespace margelo::nitro::pulseeditor { struct ThumbnailOptions; }
 // Forward declaration of `MergeCrop` to properly resolve imports.
 namespace margelo::nitro::pulseeditor { struct MergeCrop; }
+// Forward declaration of `Frame` to properly resolve imports.
+namespace margelo::nitro::pulseeditor { struct Frame; }
+// Forward declaration of `FramesOptions` to properly resolve imports.
+namespace margelo::nitro::pulseeditor { struct FramesOptions; }
 // Forward declaration of `HybridMergeJobSpec` to properly resolve imports.
 namespace margelo::nitro::pulseeditor { class HybridMergeJobSpec; }
 // Forward declaration of `MergeClip` to properly resolve imports.
@@ -58,10 +62,12 @@ namespace margelo::nitro::pulseeditor { class HybridSeekBenchSpec; }
 #include "Thumbnail.hpp"
 #include "ThumbnailOptions.hpp"
 #include "MergeCrop.hpp"
+#include "Frame.hpp"
+#include <vector>
+#include "FramesOptions.hpp"
 #include <memory>
 #include "HybridMergeJobSpec.hpp"
 #include "MergeClip.hpp"
-#include <vector>
 #include "MergeOptions.hpp"
 #include "MergeAudio.hpp"
 #include "HybridConformJobSpec.hpp"
@@ -136,6 +142,14 @@ namespace margelo::nitro::pulseeditor {
     }
     inline std::shared_ptr<Promise<Thumbnail>> thumbnail(const std::string& uri, const ThumbnailOptions& options) override {
       auto __result = _swiftPart.thumbnail(uri, std::forward<decltype(options)>(options));
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
+    inline std::shared_ptr<Promise<std::vector<Frame>>> frames(const std::string& uri, const FramesOptions& options) override {
+      auto __result = _swiftPart.frames(uri, std::forward<decltype(options)>(options));
       if (__result.hasError()) [[unlikely]] {
         std::rethrow_exception(__result.error());
       }

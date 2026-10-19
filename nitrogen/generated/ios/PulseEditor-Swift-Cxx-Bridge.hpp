@@ -14,6 +14,8 @@ namespace NitroModules { class ArrayBufferHolder; }
 namespace margelo::nitro::pulseeditor { struct AudioPCM; }
 // Forward declaration of `ConformResult` to properly resolve imports.
 namespace margelo::nitro::pulseeditor { struct ConformResult; }
+// Forward declaration of `Frame` to properly resolve imports.
+namespace margelo::nitro::pulseeditor { struct Frame; }
 // Forward declaration of `HybridConformJobSpec` to properly resolve imports.
 namespace margelo::nitro::pulseeditor { class HybridConformJobSpec; }
 // Forward declaration of `HybridMergeJobSpec` to properly resolve imports.
@@ -72,6 +74,7 @@ namespace PulseEditor { class HybridSeekBenchSpec_cxx; }
 // Include C++ defined types
 #include "AudioPCM.hpp"
 #include "ConformResult.hpp"
+#include "Frame.hpp"
 #include "HybridConformJobSpec.hpp"
 #include "HybridMergeJobSpec.hpp"
 #include "HybridPulseEditorSpec.hpp"
@@ -531,6 +534,51 @@ namespace margelo::nitro::pulseeditor::bridge::swift {
     return optional.value();
   }
   
+  // pragma MARK: std::vector<Frame>
+  /**
+   * Specialized version of `std::vector<Frame>`.
+   */
+  using std__vector_Frame_ = std::vector<Frame>;
+  inline std::vector<Frame> create_std__vector_Frame_(size_t size) noexcept {
+    std::vector<Frame> vector;
+    vector.reserve(size);
+    return vector;
+  }
+  
+  // pragma MARK: std::shared_ptr<Promise<std::vector<Frame>>>
+  /**
+   * Specialized version of `std::shared_ptr<Promise<std::vector<Frame>>>`.
+   */
+  using std__shared_ptr_Promise_std__vector_Frame___ = std::shared_ptr<Promise<std::vector<Frame>>>;
+  inline std::shared_ptr<Promise<std::vector<Frame>>> create_std__shared_ptr_Promise_std__vector_Frame___() noexcept {
+    return Promise<std::vector<Frame>>::create();
+  }
+  inline PromiseHolder<std::vector<Frame>> wrap_std__shared_ptr_Promise_std__vector_Frame___(std::shared_ptr<Promise<std::vector<Frame>>> promise) noexcept {
+    return PromiseHolder<std::vector<Frame>>(std::move(promise));
+  }
+  
+  // pragma MARK: std::function<void(const std::vector<Frame>& /* result */)>
+  /**
+   * Specialized version of `std::function<void(const std::vector<Frame>&)>`.
+   */
+  using Func_void_std__vector_Frame_ = std::function<void(const std::vector<Frame>& /* result */)>;
+  /**
+   * Wrapper class for a `std::function<void(const std::vector<Frame>& / * result * /)>`, this can be used from Swift.
+   */
+  class Func_void_std__vector_Frame__Wrapper final {
+  public:
+    explicit Func_void_std__vector_Frame__Wrapper(std::function<void(const std::vector<Frame>& /* result */)>&& func): _function(std::make_unique<std::function<void(const std::vector<Frame>& /* result */)>>(std::move(func))) {}
+    inline void call(std::vector<Frame> result) const noexcept {
+      _function->operator()(result);
+    }
+  private:
+    std::unique_ptr<std::function<void(const std::vector<Frame>& /* result */)>> _function;
+  } SWIFT_NONCOPYABLE;
+  Func_void_std__vector_Frame_ create_Func_void_std__vector_Frame_(void* NON_NULL swiftClosureWrapper) noexcept;
+  inline Func_void_std__vector_Frame__Wrapper wrap_Func_void_std__vector_Frame_(Func_void_std__vector_Frame_ value) noexcept {
+    return Func_void_std__vector_Frame__Wrapper(std::move(value));
+  }
+  
   // pragma MARK: std::vector<MergeClip>
   /**
    * Specialized version of `std::vector<MergeClip>`.
@@ -579,6 +627,15 @@ namespace margelo::nitro::pulseeditor::bridge::swift {
   }
   inline Result_std__shared_ptr_Promise_Thumbnail___ create_Result_std__shared_ptr_Promise_Thumbnail___(const std::exception_ptr& error) noexcept {
     return Result<std::shared_ptr<Promise<Thumbnail>>>::withError(error);
+  }
+  
+  // pragma MARK: Result<std::shared_ptr<Promise<std::vector<Frame>>>>
+  using Result_std__shared_ptr_Promise_std__vector_Frame____ = Result<std::shared_ptr<Promise<std::vector<Frame>>>>;
+  inline Result_std__shared_ptr_Promise_std__vector_Frame____ create_Result_std__shared_ptr_Promise_std__vector_Frame____(const std::shared_ptr<Promise<std::vector<Frame>>>& value) noexcept {
+    return Result<std::shared_ptr<Promise<std::vector<Frame>>>>::withValue(value);
+  }
+  inline Result_std__shared_ptr_Promise_std__vector_Frame____ create_Result_std__shared_ptr_Promise_std__vector_Frame____(const std::exception_ptr& error) noexcept {
+    return Result<std::shared_ptr<Promise<std::vector<Frame>>>>::withError(error);
   }
   
   // pragma MARK: Result<std::shared_ptr<HybridMergeJobSpec>>

@@ -13,6 +13,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.ScaleAndRotateTransformation
 import androidx.media3.inspector.frame.FrameExtractor
+import com.margelo.nitro.core.ArrayBuffer
 import com.margelo.nitro.pulseeditor.merge.Merge
 import com.margelo.nitro.pulseeditor.merge.MergeException
 import kotlin.math.max
@@ -61,6 +62,57 @@ internal object FrameGrab {
 
   suspend fun run(context: Context, uri: String, options: ThumbnailOptions): Thumbnail = oneAtATime.withLock {
     Merge.removeStaleOutputs(context)
+    val (bitmap, presentationMs) = grab(context, uri, options)
+    val file = Merge.outputFile(context, "frame", "jpg")
+    withContext(Dispatchers.IO) {
+      file.parentFile?.mkdirs()
+      val quality = (options.quality.coerceIn(0.0, 1.0) * 100).roundToInt()
+      file.outputStream().use { out ->
+        if (!bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)) {
+          throw MergeException("Couldn't write the image file.")
+        }
+      }
+    }
+    Thumbnail(
+      uri = Uri.fromFile(file).toString(),
+      width = bitmap.width.toDouble(),
+      height = bitmap.height.toDouble(),
+      timeMs = presentationMs,
+    )
+  }
+
+  /**
+   * Several frames as JPEG bytes, in the order asked, from the warm extractor (taken in source
+   * order, so its seeks run forward). Exact frames: Android doesn't take the nearest keyframe for
+   * `toleranceMs` yet.
+   */
+  suspend fun frames(context: Context, uri: String, options: FramesOptions): Array<Frame> = oneAtATime.withLock {
+    val order = options.timesMs.indices.sortedBy { options.timesMs[it] }
+    val out = arrayOfNulls<Frame>(options.timesMs.size)
+    val quality = (options.quality.coerceIn(0.0, 1.0) * 100).roundToInt()
+    for (i in order) {
+      val one = ThumbnailOptions(
+        options.timesMs[i], options.maxWidth, options.maxHeight, options.quality,
+        options.rotation, options.flipped, options.crop)
+      val (bitmap, presentationMs) = grab(context, uri, one)
+      val bytes = withContext(Dispatchers.Default) {
+        java.io.ByteArrayOutputStream().use { buf ->
+          if (!bitmap.compress(Bitmap.CompressFormat.JPEG, quality, buf)) {
+            throw MergeException("Couldn't encode the frame.")
+          }
+          buf.toByteArray()
+        }
+      }
+      out[i] = Frame(
+        options.timesMs[i], presentationMs, bitmap.width.toDouble(), bitmap.height.toDouble(),
+        ArrayBuffer.copy(bytes))
+    }
+    out.requireNoNulls()
+  }
+
+  /** The frame at `options.timeMs`, with the edit drawn, and when it starts (ms). Callers hold
+   * `oneAtATime`. */
+  private suspend fun grab(context: Context, uri: String, options: ThumbnailOptions): Pair<Bitmap, Double> {
     val source = Probe.read(context, uri)
     val video = source.video ?: throw MergeException("The file has no video.")
 
@@ -94,22 +146,7 @@ internal object FrameGrab {
     }
 
     val bitmap = withContext(Dispatchers.Default) { edited(frame.bitmap, options) }
-    val file = Merge.outputFile(context, "frame", "jpg")
-    withContext(Dispatchers.IO) {
-      file.parentFile?.mkdirs()
-      val quality = (options.quality.coerceIn(0.0, 1.0) * 100).roundToInt()
-      file.outputStream().use { out ->
-        if (!bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)) {
-          throw MergeException("Couldn't write the image file.")
-        }
-      }
-    }
-    Thumbnail(
-      uri = Uri.fromFile(file).toString(),
-      width = bitmap.width.toDouble(),
-      height = bitmap.height.toDouble(),
-      timeMs = frame.presentationTimeMs.toDouble(),
-    )
+    return bitmap to frame.presentationTimeMs.toDouble()
   }
 
   /** A local file's size and modification time (empty for other URIs). */

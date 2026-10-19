@@ -11,6 +11,8 @@ import type {
   SeekBenchResult,
   Thumbnail,
   ThumbnailOptions,
+  FramesOptions,
+  Frame,
 } from './PulseEditor.nitro';
 
 export type {
@@ -35,6 +37,8 @@ export type {
   Thumbnail,
   ThumbnailOptions,
   Transfer,
+  FramesOptions,
+  Frame,
 } from './PulseEditor.nitro';
 export type { PreviewStats, PreviewStatus } from './PulsePreview.nitro';
 export {
@@ -109,6 +113,33 @@ export function thumbnail(
     ...options,
   };
   return editor.thumbnail(uri, full).catch((e) => {
+    throw nativeError(e);
+  });
+}
+
+/**
+ * Several frames of one file as JPEG bytes, from one decoder, each drawn with the clip's edit as
+ * `thumbnail` draws it. With `toleranceMs`, the nearest keyframe within it is taken instead of the
+ * exact frame (much faster for a filmstrip). Defaults: no size limit, quality 0.7, exact frames,
+ * no edit.
+ */
+export function frames(
+  uri: string,
+  options: Partial<FramesOptions> & { timesMs: number[] }
+): Promise<Frame[]> {
+  if (!uri?.trim().length) {
+    return Promise.reject(new Error('File path cannot be empty.'));
+  }
+  const full: FramesOptions = {
+    maxWidth: 0,
+    maxHeight: 0,
+    quality: 0.7,
+    toleranceMs: 0,
+    rotation: 0,
+    flipped: false,
+    ...options,
+  };
+  return editor.frames(uri, full).catch((e) => {
     throw nativeError(e);
   });
 }
