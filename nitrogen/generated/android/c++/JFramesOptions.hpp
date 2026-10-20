@@ -10,9 +10,6 @@
 #include <fbjni/fbjni.h>
 #include "FramesOptions.hpp"
 
-#include "JMergeCrop.hpp"
-#include "MergeCrop.hpp"
-#include <optional>
 #include <vector>
 
 namespace margelo::nitro::pulseeditor {
@@ -44,12 +41,6 @@ namespace margelo::nitro::pulseeditor {
       double quality = this->getFieldValue(fieldQuality);
       static const auto fieldToleranceMs = clazz->getField<double>("toleranceMs");
       double toleranceMs = this->getFieldValue(fieldToleranceMs);
-      static const auto fieldRotation = clazz->getField<double>("rotation");
-      double rotation = this->getFieldValue(fieldRotation);
-      static const auto fieldFlipped = clazz->getField<jboolean>("flipped");
-      jboolean flipped = this->getFieldValue(fieldFlipped);
-      static const auto fieldCrop = clazz->getField<JMergeCrop>("crop");
-      jni::local_ref<JMergeCrop> crop = this->getFieldValue(fieldCrop);
       return FramesOptions(
         [&]() {
           size_t __size = timesMs->size();
@@ -60,10 +51,7 @@ namespace margelo::nitro::pulseeditor {
         maxWidth,
         maxHeight,
         quality,
-        toleranceMs,
-        rotation,
-        static_cast<bool>(flipped),
-        crop != nullptr ? std::make_optional(crop->toCpp()) : std::nullopt
+        toleranceMs
       );
     }
 
@@ -73,7 +61,7 @@ namespace margelo::nitro::pulseeditor {
      */
     [[maybe_unused]]
     static jni::local_ref<JFramesOptions::javaobject> fromCpp(const FramesOptions& value) {
-      using JSignature = JFramesOptions(jni::alias_ref<jni::JArrayDouble>, double, double, double, double, double, jboolean, jni::alias_ref<JMergeCrop>);
+      using JSignature = JFramesOptions(jni::alias_ref<jni::JArrayDouble>, double, double, double, double);
       static const auto clazz = javaClassStatic();
       static const auto create = clazz->getStaticMethod<JSignature>("fromCpp");
       return create(
@@ -87,10 +75,7 @@ namespace margelo::nitro::pulseeditor {
         value.maxWidth,
         value.maxHeight,
         value.quality,
-        value.toleranceMs,
-        value.rotation,
-        value.flipped,
-        value.crop.has_value() ? JMergeCrop::fromCpp(value.crop.value()) : nullptr
+        value.toleranceMs
       );
     }
   };

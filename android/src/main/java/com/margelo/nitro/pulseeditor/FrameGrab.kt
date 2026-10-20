@@ -20,6 +20,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.sync.Mutex
@@ -82,46 +83,62 @@ internal object FrameGrab {
   }
 
   /**
-   * Several frames as JPEG bytes, in the order asked, from the warm extractor (taken in source
-   * order, so its seeks run forward). Exact frames: Android doesn't take the nearest keyframe for
-   * `toleranceMs` yet.
+   * Several frames as JPEG bytes, in the order asked: the file's own pictures, upright and
+   * unedited, from the warm extractor (taken in source order, so its seeks run forward), the file
+   * probed once. Exact frames: Android doesn't take the nearest keyframe for `toleranceMs` yet. A
+   * time that can't be decoded is left out; the rest still come.
    */
   suspend fun frames(context: Context, uri: String, options: FramesOptions): Array<Frame> = oneAtATime.withLock {
+    val source = Probe.read(context, uri)
+    if (source.video == null) throw MergeException("The file has no video.")
     val order = options.timesMs.indices.sortedBy { options.timesMs[it] }
     val out = arrayOfNulls<Frame>(options.timesMs.size)
     val quality = (options.quality.coerceIn(0.0, 1.0) * 100).roundToInt()
     for (i in order) {
       val one = ThumbnailOptions(
-        options.timesMs[i], options.maxWidth, options.maxHeight, options.quality,
-        options.rotation, options.flipped, options.crop)
-      val (bitmap, presentationMs) = grab(context, uri, one)
-      val bytes = withContext(Dispatchers.Default) {
-        java.io.ByteArrayOutputStream().use { buf ->
-          if (!bitmap.compress(Bitmap.CompressFormat.JPEG, quality, buf)) {
-            throw MergeException("Couldn't encode the frame.")
+        options.timesMs[i], options.maxWidth, options.maxHeight, options.quality, 0.0, false, null)
+      try {
+        val (bitmap, presentationMs) = grab(context, uri, one, source)
+        val bytes = withContext(Dispatchers.Default) {
+          java.io.ByteArrayOutputStream().use { buf ->
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, quality, buf)) {
+              throw MergeException("Couldn't encode the frame.")
+            }
+            buf.toByteArray()
           }
-          buf.toByteArray()
         }
+        out[i] = Frame(
+          options.timesMs[i], presentationMs, bitmap.width.toDouble(), bitmap.height.toDouble(),
+          ArrayBuffer.copy(bytes))
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        // Left out: the caller keeps its nearest frame.
       }
-      out[i] = Frame(
-        options.timesMs[i], presentationMs, bitmap.width.toDouble(), bitmap.height.toDouble(),
-        ArrayBuffer.copy(bytes))
     }
-    out.requireNoNulls()
+    out.filterNotNull().toTypedArray()
   }
 
   /** The frame at `options.timeMs`, with the edit drawn, and when it starts (ms). Callers hold
-   * `oneAtATime`. */
-  private suspend fun grab(context: Context, uri: String, options: ThumbnailOptions): Pair<Bitmap, Double> {
-    val source = Probe.read(context, uri)
-    val video = source.video ?: throw MergeException("The file has no video.")
+   * `oneAtATime`. A filmstrip passes its probe (`source`), and its frames are extracted at the
+   * size asked (unedited, nothing to crop) rather than at [MAX_FRAME_SIDE]. */
+  private suspend fun grab(
+    context: Context,
+    uri: String,
+    options: ThumbnailOptions,
+    source: ProbeResult? = null,
+  ): Pair<Bitmap, Double> {
+    val probed = source ?: Probe.read(context, uri)
+    val video = probed.video ?: throw MergeException("The file has no video.")
 
     // Inside the video: a time past its last frame takes the last frame.
     val frameMs = if (video.fps > 0) 1000 / video.fps else 1000 / 30.0
-    val lengthMs = if (video.durationMs > 0) video.durationMs else source.durationMs
+    val lengthMs = if (video.durationMs > 0) video.durationMs else probed.durationMs
     val timeMs = min(max(0.0, options.timeMs), max(0.0, lengthMs - frameMs)).roundToLong()
 
-    val (boundW, boundH) = boundedSize(video)
+    val (boundW, boundH) = boundedSize(video).let { (w, h) ->
+      if (source != null) fitted(w.toDouble(), h.toDouble(), options.maxWidth, options.maxHeight) else w to h
+    }
     val identity = "$uri|${fileStamp(uri)}"
     val key = "$identity|${video.mirrored}|${boundW}x$boundH"
     val frame = withContext(Dispatchers.Main) {

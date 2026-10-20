@@ -32,16 +32,7 @@ data class FramesOptions(
   val quality: Double,
   @DoNotStrip
   @Keep
-  val toleranceMs: Double,
-  @DoNotStrip
-  @Keep
-  val rotation: Double,
-  @DoNotStrip
-  @Keep
-  val flipped: Boolean,
-  @DoNotStrip
-  @Keep
-  val crop: MergeCrop?
+  val toleranceMs: Double
 ) {
   /* primary constructor */
 
@@ -53,9 +44,6 @@ data class FramesOptions(
       && Objects.deepEquals(this.maxHeight, other.maxHeight)
       && Objects.deepEquals(this.quality, other.quality)
       && Objects.deepEquals(this.toleranceMs, other.toleranceMs)
-      && Objects.deepEquals(this.rotation, other.rotation)
-      && Objects.deepEquals(this.flipped, other.flipped)
-      && Objects.deepEquals(this.crop, other.crop)
   }
 
   override fun hashCode(): Int {
@@ -64,10 +52,7 @@ data class FramesOptions(
       maxWidth,
       maxHeight,
       quality,
-      toleranceMs,
-      rotation,
-      flipped,
-      crop
+      toleranceMs
     ).contentDeepHashCode()
   }
 
@@ -79,8 +64,8 @@ data class FramesOptions(
     @Keep
     @Suppress("unused")
     @JvmStatic
-    private fun fromCpp(timesMs: DoubleArray, maxWidth: Double, maxHeight: Double, quality: Double, toleranceMs: Double, rotation: Double, flipped: Boolean, crop: MergeCrop?): FramesOptions {
-      return FramesOptions(timesMs, maxWidth, maxHeight, quality, toleranceMs, rotation, flipped, crop)
+    private fun fromCpp(timesMs: DoubleArray, maxWidth: Double, maxHeight: Double, quality: Double, toleranceMs: Double): FramesOptions {
+      return FramesOptions(timesMs, maxWidth, maxHeight, quality, toleranceMs)
     }
   }
 }

@@ -3,44 +3,26 @@ import ImageIO
 import NitroModules
 import UniformTypeIdentifiers
 
-/// Frames as JPEGs: `AVAssetImageGenerator` reading through a video composition built with merge's
-/// own geometry (`MergeGeometry`), so an edited clip's frames are drawn exactly as the export
-/// renders it, and HDR is tone-mapped to BT.709 the same way. Scaled to fit the maximum size,
-/// never up. `run` takes one exact frame (a cover); `frames` takes several from one generator (a
-/// filmstrip), each the nearest keyframe within the tolerance when one is given.
+/// Frames as JPEGs. `run` takes one (a cover): `AVAssetImageGenerator` reading through a video
+/// composition built with merge's own geometry (`MergeGeometry`), so an edited clip's cover is
+/// drawn exactly as the export renders it, and HDR is tone-mapped to BT.709 the same way; the exact
+/// frame at the requested time, scaled to fit the maximum size, never up. `frames` takes several
+/// for a filmstrip, the file's own pictures (see there).
 enum FrameGrab {
-  /// A generator set up for one file and edit, and what's needed to place times inside its video.
-  struct Prepared {
-    let generator: AVAssetImageGenerator
-    let range: CMTimeRange
-    let frame: CMTime
-
-    /// `ms` (from the video's start) as a time inside it: past the last frame is the last frame.
-    func time(_ ms: Double) -> CMTime {
-      let lastFrame = range.end - frame
-      return CMTimeMaximum(range.start, CMTimeMinimum(
-        range.start + CMTime(value: CMTimeValue(max(0, ms).rounded()), timescale: 1000), lastFrame))
-    }
-  }
-
-  static func prepare(
-    _ uri: String, rotation: Double, flipped: Bool, crop: MergeCrop?,
-    maxWidth: Double, maxHeight: Double
-  ) async throws -> Prepared {
+  static func run(_ uri: String, _ options: ThumbnailOptions) async throws -> Thumbnail {
     let media = try await Probe.load(fileURL(uri))
     guard let track = media.videoTrack else { throw MergeError.invalid("The file has no video.") }
-    let (size, transform, range, minFrame) = try await track.load(
+    let (size, transform, range, frame) = try await track.load(
       .naturalSize, .preferredTransform, .timeRange, .minFrameDuration)
-    let frame = minFrame.isNumeric && minFrame > .zero ? minFrame : CMTime(value: 1, timescale: 30)
 
     let clip = MergeClip(
       uri: uri, startMs: 0, endMs: 0, speed: 1, muted: false,
-      rotation: rotation, flipped: flipped, crop: crop)
+      rotation: options.rotation, flipped: options.flipped, crop: options.crop)
     // The edited picture's size first, then the output: that size fitted into the maximum.
     let content = MergeGeometry(
       clip: clip, sourceSize: size, sourceTransform: transform,
       targetSize: size, targetTransform: .identity, canvas: size).contentSize
-    let output = fitted(content, maxWidth: maxWidth, maxHeight: maxHeight)
+    let output = fitted(content, maxWidth: options.maxWidth, maxHeight: options.maxHeight)
     let geometry = MergeGeometry(
       clip: clip, sourceSize: size, sourceTransform: transform,
       targetSize: output, targetTransform: .identity, canvas: output)
@@ -54,7 +36,7 @@ enum FrameGrab {
     let composition = AVMutableVideoComposition()
     composition.instructions = [instruction]
     composition.renderSize = output
-    composition.frameDuration = frame
+    composition.frameDuration = frameDuration(frame)
     composition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
     composition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
     composition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
@@ -63,20 +45,14 @@ enum FrameGrab {
     generator.videoComposition = composition
     generator.requestedTimeToleranceBefore = .zero
     generator.requestedTimeToleranceAfter = .zero
-    return Prepared(generator: generator, range: range, frame: frame)
-  }
 
-  static func run(_ uri: String, _ options: ThumbnailOptions) async throws -> Thumbnail {
-    let prepared = try await prepare(
-      uri, rotation: options.rotation, flipped: options.flipped, crop: options.crop,
-      maxWidth: options.maxWidth, maxHeight: options.maxHeight)
-    let wanted = prepared.time(options.timeMs)
+    let wanted = time(options.timeMs, in: range, frame: frameDuration(frame))
     let image: CGImage
     var actual = CMTime.zero
     if #available(iOS 16, *) {
-      (image, actual) = try await prepared.generator.image(at: wanted)
+      (image, actual) = try await generator.image(at: wanted)
     } else {
-      image = try prepared.generator.copyCGImage(at: wanted, actualTime: &actual)
+      image = try generator.copyCGImage(at: wanted, actualTime: &actual)
     }
 
     let url = try Merge.outputURL("frame", extension: "jpg")
@@ -91,115 +67,88 @@ enum FrameGrab {
     }
     return Thumbnail(
       uri: url.absoluteString, width: Double(image.width), height: Double(image.height),
-      timeMs: Probe.ms(actual - prepared.range.start))
+      timeMs: Probe.ms(actual - range.start))
   }
 
-  /// Several frames from one generator, in the order asked, for a filmstrip: read straight from
-  /// the video (upright, decoded small), then the clip's edit drawn on each little picture —
-  /// clockwise rotation, horizontal flip, crop, as merge applies them. Without a video composition
-  /// the generator can take the nearest keyframe within `toleranceMs` (a composition makes every
-  /// frame exact, about 150 ms each on an iPhone 17 Pro Max), and it gets every time at once
-  /// (`images(for:)`, in source order), so it decodes forward through the file. HDR frames aren't
-  /// tone-mapped as merge does: fine for a filmstrip, not for a cover (`run`).
+  /// Several frames from one generator, in the order asked, for a filmstrip: the file's own
+  /// pictures, upright and unedited (the app draws a clip's edit on them), decoded small. Without
+  /// a video composition the generator can take the nearest keyframe within `toleranceMs` (a
+  /// composition makes every frame exact, about 150 ms each on an iPhone 17 Pro Max), and it gets
+  /// every time at once (`images(for:)`, in source order), so it decodes forward through the file.
+  /// A time that can't be decoded is left out; the rest still come. HDR frames aren't tone-mapped
+  /// as merge does: fine for a filmstrip, not for a cover (`run`).
   static func frames(_ uri: String, _ options: FramesOptions) async throws -> [Frame] {
     let media = try await Probe.load(fileURL(uri))
     guard let track = media.videoTrack else { throw MergeError.invalid("The file has no video.") }
     let (range, minFrame) = try await track.load(.timeRange, .minFrameDuration)
-    let frame = minFrame.isNumeric && minFrame > .zero ? minFrame : CMTime(value: 1, timescale: 30)
-    let prepared = Prepared(generator: AVAssetImageGenerator(asset: media.asset), range: range, frame: frame)
-    let generator = prepared.generator
+    let frame = frameDuration(minFrame)
+    let generator = AVAssetImageGenerator(asset: media.asset)
     generator.appliesPreferredTrackTransform = true
-    // Decoded just big enough that the cropped part still fills the maximum, whichever way the
-    // picture is turned (the generator keeps the aspect inside this square).
-    let crop = options.crop
-    let zoom = 1 / max(0.05, min(crop?.w ?? 1, crop?.h ?? 1))
+    // Decoded to fit a square of the larger side (the generator keeps the aspect, never scales
+    // up); a box that isn't square is fitted after.
     let side = max(options.maxWidth, options.maxHeight)
-    if side > 0 { generator.maximumSize = CGSize(width: side * zoom, height: side * zoom) }
+    if side > 0 { generator.maximumSize = CGSize(width: side, height: side) }
     let tolerance = CMTime(value: CMTimeValue(max(0, options.toleranceMs).rounded()), timescale: 1000)
     generator.requestedTimeToleranceBefore = tolerance
     generator.requestedTimeToleranceAfter = tolerance
     let quality = min(max(options.quality, 0), 1)
 
+    // In source order (one forward pass); results go back to the order asked.
     let order = options.timesMs.indices.sorted { options.timesMs[$0] < options.timesMs[$1] }
-    let times = order.map { prepared.time(options.timesMs[$0]) }
-    var out = [Frame?](repeating: nil, count: options.timesMs.count)
-    func keep(_ k: Int, _ upright: CGImage, _ actual: CMTime) throws {
+    let times = order.map { time(options.timesMs[$0], in: range, frame: frame) }
+    var out = [Frame?](repeating: nil, count: times.count)
+    var answered = [Bool](repeating: false, count: times.count)
+    func keep(_ k: Int, _ upright: CGImage, _ actual: CMTime) {
       let i = order[k]
-      let image = edited(upright, options)
+      let image = scaled(upright, maxWidth: options.maxWidth, maxHeight: options.maxHeight)
+      guard let data = try? jpegBuffer(image, quality) else { return }
       out[i] = Frame(
         timeMs: options.timesMs[i], actualMs: Probe.ms(actual - range.start),
-        width: Double(image.width), height: Double(image.height),
-        data: try jpegBuffer(image, quality))
+        width: Double(image.width), height: Double(image.height), data: data)
     }
     if #available(iOS 16, *) {
-      var next = 0
       for await result in generator.images(for: times) {
-        try Task.checkCancellation()
-        // Results come back in the order asked; match each by its requested time anyway.
-        var k = next
-        while k < times.count && times[k] != result.requestedTime { k += 1 }
-        if k == times.count { k = next }
-        next = k + 1
-        try keep(k, try result.image, (try? result.actualTime) ?? times[k])
+        // The first time not answered yet that this result is for (times clamped to the video's
+        // end can repeat).
+        guard let k = times.indices.first(where: { !answered[$0] && times[$0] == result.requestedTime })
+        else { continue }
+        answered[k] = true
+        guard let image = try? result.image else { continue }
+        keep(k, image, (try? result.actualTime) ?? times[k])
       }
     } else {
       for k in times.indices {
-        try Task.checkCancellation()
         var actual = CMTime.zero
-        try keep(k, try generator.copyCGImage(at: times[k], actualTime: &actual), actual)
+        guard let image = try? generator.copyCGImage(at: times[k], actualTime: &actual) else { continue }
+        keep(k, image, actual)
       }
     }
     return out.compactMap { $0 }
   }
 
-  /// An upright frame with the clip's edit drawn (clockwise rotation, then a horizontal flip, then
-  /// the crop, normalized in the turned and flipped picture), fitted into the maximum.
-  private static func edited(_ image: CGImage, _ options: FramesOptions) -> CGImage {
-    let degrees = ((Int(options.rotation.rounded()) % 360) + 360) % 360
-    let w = CGFloat(image.width)
-    let h = CGFloat(image.height)
-    var turned = image
-    if degrees != 0 || options.flipped {
-      let quarter = degrees == 90 || degrees == 270
-      let size = quarter ? CGSize(width: h, height: w) : CGSize(width: w, height: h)
-      // CoreGraphics is y-up: a clockwise turn on screen maps (x, y) to these.
-      let rotate: CGAffineTransform
-      switch degrees {
-      case 90: rotate = CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: w)
-      case 180: rotate = CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: w, ty: h)
-      case 270: rotate = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: h, ty: 0)
-      default: rotate = .identity
-      }
-      let flip = options.flipped
-        ? CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: size.width, ty: 0) : .identity
-      if let context = bitmap(size) {
-        context.concatenate(rotate.concatenating(flip))
-        context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        if let made = context.makeImage() { turned = made }
-      }
-    }
-    if let c = options.crop {
-      let tw = CGFloat(turned.width)
-      let th = CGFloat(turned.height)
-      // CGImage cropping is in pixels from the top left, as the crop is.
-      let rect = CGRect(x: c.x * tw, y: c.y * th, width: c.w * tw, height: c.h * th).integral
-      if let cropped = turned.cropping(to: rect) { turned = cropped }
-    }
-    let out = fitted(
-      CGSize(width: turned.width, height: turned.height),
-      maxWidth: options.maxWidth, maxHeight: options.maxHeight)
-    if Int(out.width) >= turned.width && Int(out.height) >= turned.height { return turned }
-    guard let context = bitmap(out) else { return turned }
-    context.interpolationQuality = .medium
-    context.draw(turned, in: CGRect(origin: .zero, size: out))
-    return context.makeImage() ?? turned
+  /// `ms` (from the video's start) as a time inside it: past the last frame is the last frame.
+  private static func time(_ ms: Double, in range: CMTimeRange, frame: CMTime) -> CMTime {
+    CMTimeMaximum(range.start, CMTimeMinimum(
+      range.start + CMTime(value: CMTimeValue(max(0, ms).rounded()), timescale: 1000), range.end - frame))
   }
 
-  private static func bitmap(_ size: CGSize) -> CGContext? {
-    CGContext(
-      data: nil, width: max(1, Int(size.width)), height: max(1, Int(size.height)),
-      bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+  /// A track's frame duration, or 1/30 s when it doesn't say.
+  private static func frameDuration(_ min: CMTime) -> CMTime {
+    min.isNumeric && min > .zero ? min : CMTime(value: 1, timescale: 30)
+  }
+
+  /// `image` fitted inside maxWidth × maxHeight (never up); itself when it already fits.
+  private static func scaled(_ image: CGImage, maxWidth: Double, maxHeight: Double) -> CGImage {
+    let out = fitted(CGSize(width: image.width, height: image.height), maxWidth: maxWidth, maxHeight: maxHeight)
+    if Int(out.width) >= image.width && Int(out.height) >= image.height { return image }
+    guard let context = CGContext(
+      data: nil, width: Int(out.width), height: Int(out.height), bitsPerComponent: 8,
+      bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
       bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+    else { return image }
+    context.interpolationQuality = .medium
+    context.draw(image, in: CGRect(origin: .zero, size: out))
+    return context.makeImage() ?? image
   }
 
   /// `image` as JPEG bytes, in memory.

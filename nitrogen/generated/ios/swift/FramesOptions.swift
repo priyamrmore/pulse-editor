@@ -18,20 +18,14 @@ public extension FramesOptions {
   /**
    * Create a new instance of `FramesOptions`.
    */
-  init(timesMs: [Double], maxWidth: Double, maxHeight: Double, quality: Double, toleranceMs: Double, rotation: Double, flipped: Bool, crop: MergeCrop?) {
+  init(timesMs: [Double], maxWidth: Double, maxHeight: Double, quality: Double, toleranceMs: Double) {
     self.init({ () -> bridge.std__vector_double_ in
       var __vector = bridge.create_std__vector_double_(timesMs.count)
       for __item in timesMs {
         __vector.push_back(__item)
       }
       return __vector
-    }(), maxWidth, maxHeight, quality, toleranceMs, rotation, flipped, { () -> bridge.std__optional_MergeCrop_ in
-      if let __unwrappedValue = crop {
-        return bridge.create_std__optional_MergeCrop_(__unwrappedValue)
-      } else {
-        return .init()
-      }
-    }())
+    }(), maxWidth, maxHeight, quality, toleranceMs)
   }
 
   @inline(__always)
@@ -57,20 +51,5 @@ public extension FramesOptions {
   @inline(__always)
   var toleranceMs: Double {
     return self.__toleranceMs
-  }
-  
-  @inline(__always)
-  var rotation: Double {
-    return self.__rotation
-  }
-  
-  @inline(__always)
-  var flipped: Bool {
-    return self.__flipped
-  }
-  
-  @inline(__always)
-  var crop: MergeCrop? {
-    return self.__crop.value
   }
 }

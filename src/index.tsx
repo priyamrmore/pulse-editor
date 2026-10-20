@@ -118,10 +118,10 @@ export function thumbnail(
 }
 
 /**
- * Several frames of one file as JPEG bytes, from one decoder, each drawn with the clip's edit as
- * `thumbnail` draws it. With `toleranceMs`, the nearest keyframe within it is taken instead of the
- * exact frame (much faster for a filmstrip). Defaults: no size limit, quality 0.7, exact frames,
- * no edit.
+ * Several frames of one file as JPEG bytes, from one decoder: the file's own pictures, upright and
+ * unedited. With `toleranceMs`, the nearest keyframe within it is taken instead of the exact frame
+ * (much faster for a filmstrip). A time that can't be decoded is left out. Defaults: no size
+ * limit, quality 0.7, exact frames.
  */
 export function frames(
   uri: string,
@@ -135,8 +135,6 @@ export function frames(
     maxHeight: 0,
     quality: 0.7,
     toleranceMs: 0,
-    rotation: 0,
-    flipped: false,
     ...options,
   };
   return editor.frames(uri, full).catch((e) => {

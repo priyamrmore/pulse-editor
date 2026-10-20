@@ -151,7 +151,7 @@ export interface Thumbnail {
   timeMs: number;
 }
 
-/** Which frames `frames` takes, how big, how close to the times asked, and the clip's edit. */
+/** Which frames `frames` takes, how big, and how close to the times asked. */
 export interface FramesOptions {
   /** Source times in ms, in any order (each clamped to the video). */
   timesMs: number[];
@@ -161,12 +161,8 @@ export interface FramesOptions {
   /** JPEG quality, 0–1. */
   quality: number;
   /** How far from its time a frame may come, ms: within it the nearest keyframe is taken, which
-   * skips decoding the frames between. 0 = the exact frame. */
+   * skips decoding the frames between (iOS; Android takes exact frames). 0 = the exact frame. */
   toleranceMs: number;
-  /** The clip's edit, as in `ThumbnailOptions`. */
-  rotation: number;
-  flipped: boolean;
-  crop?: MergeCrop;
 }
 
 /** One frame from `frames`, as JPEG bytes. */
@@ -366,9 +362,10 @@ export interface PulseEditor extends HybridObject<{
 
   /**
    * Several frames of one file as JPEG bytes, in the order asked, from one decoder (a timeline's
-   * filmstrip). Each is drawn with the clip's edit as `thumbnail` draws it; within `toleranceMs`
-   * the nearest keyframe is taken instead of the exact frame. Rejects when the file has no video
-   * or can't be decoded.
+   * filmstrip): the file's own pictures, upright and unedited (the caller draws an edit on them),
+   * not tone-mapped from HDR as `thumbnail` and merge do. Within `toleranceMs` the nearest keyframe
+   * is taken instead of the exact frame. A time that can't be decoded is left out; rejects when
+   * the file has no video or can't be opened.
    */
   frames(uri: string, options: FramesOptions): Promise<Frame[]>;
 

@@ -28,12 +28,9 @@
 #error NitroModules cannot be found! Are you sure you installed NitroModules properly?
 #endif
 
-// Forward declaration of `MergeCrop` to properly resolve imports.
-namespace margelo::nitro::pulseeditor { struct MergeCrop; }
+
 
 #include <vector>
-#include "MergeCrop.hpp"
-#include <optional>
 
 namespace margelo::nitro::pulseeditor {
 
@@ -47,13 +44,10 @@ namespace margelo::nitro::pulseeditor {
     double maxHeight     SWIFT_PRIVATE;
     double quality     SWIFT_PRIVATE;
     double toleranceMs     SWIFT_PRIVATE;
-    double rotation     SWIFT_PRIVATE;
-    bool flipped     SWIFT_PRIVATE;
-    std::optional<MergeCrop> crop     SWIFT_PRIVATE;
 
   public:
     FramesOptions() = default;
-    explicit FramesOptions(std::vector<double> timesMs, double maxWidth, double maxHeight, double quality, double toleranceMs, double rotation, bool flipped, std::optional<MergeCrop> crop): timesMs(timesMs), maxWidth(maxWidth), maxHeight(maxHeight), quality(quality), toleranceMs(toleranceMs), rotation(rotation), flipped(flipped), crop(crop) {}
+    explicit FramesOptions(std::vector<double> timesMs, double maxWidth, double maxHeight, double quality, double toleranceMs): timesMs(timesMs), maxWidth(maxWidth), maxHeight(maxHeight), quality(quality), toleranceMs(toleranceMs) {}
 
   public:
     friend bool operator==(const FramesOptions& lhs, const FramesOptions& rhs) = default;
@@ -73,10 +67,7 @@ namespace margelo::nitro {
         JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "maxWidth"))),
         JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "maxHeight"))),
         JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "quality"))),
-        JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "toleranceMs"))),
-        JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "rotation"))),
-        JSIConverter<bool>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "flipped"))),
-        JSIConverter<std::optional<margelo::nitro::pulseeditor::MergeCrop>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "crop")))
+        JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "toleranceMs")))
       );
     }
     static inline jsi::Value toJSI(jsi::Runtime& runtime, const margelo::nitro::pulseeditor::FramesOptions& arg) {
@@ -86,9 +77,6 @@ namespace margelo::nitro {
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "maxHeight"), JSIConverter<double>::toJSI(runtime, arg.maxHeight));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "quality"), JSIConverter<double>::toJSI(runtime, arg.quality));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "toleranceMs"), JSIConverter<double>::toJSI(runtime, arg.toleranceMs));
-      obj.setProperty(runtime, PropNameIDCache::get(runtime, "rotation"), JSIConverter<double>::toJSI(runtime, arg.rotation));
-      obj.setProperty(runtime, PropNameIDCache::get(runtime, "flipped"), JSIConverter<bool>::toJSI(runtime, arg.flipped));
-      obj.setProperty(runtime, PropNameIDCache::get(runtime, "crop"), JSIConverter<std::optional<margelo::nitro::pulseeditor::MergeCrop>>::toJSI(runtime, arg.crop));
       return obj;
     }
     static inline bool canConvert(jsi::Runtime& runtime, const jsi::Value& value) {
@@ -104,9 +92,6 @@ namespace margelo::nitro {
       if (!JSIConverter<double>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "maxHeight")))) return false;
       if (!JSIConverter<double>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "quality")))) return false;
       if (!JSIConverter<double>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "toleranceMs")))) return false;
-      if (!JSIConverter<double>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "rotation")))) return false;
-      if (!JSIConverter<bool>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "flipped")))) return false;
-      if (!JSIConverter<std::optional<margelo::nitro::pulseeditor::MergeCrop>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "crop")))) return false;
       return true;
     }
   };
