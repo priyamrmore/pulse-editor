@@ -161,7 +161,7 @@ export interface FramesOptions {
   /** JPEG quality, 0–1. */
   quality: number;
   /** How far from its time a frame may come, ms: within it the nearest keyframe is taken, which
-   * skips decoding the frames between (iOS; Android takes exact frames). 0 = the exact frame. */
+   * skips decoding the frames between. 0 = the exact frame. */
   toleranceMs: number;
 }
 
@@ -363,9 +363,11 @@ export interface PulseEditor extends HybridObject<{
   /**
    * Several frames of one file as JPEG bytes, in the order asked, from one decoder (a timeline's
    * filmstrip): the file's own pictures, upright and unedited (the caller draws an edit on them),
-   * not tone-mapped from HDR as `thumbnail` and merge do. Within `toleranceMs` the nearest keyframe
-   * is taken instead of the exact frame. A time that can't be decoded is left out; rejects when
-   * the file has no video or can't be opened.
+   * as 8-bit SDR JPEGs (an HDR source is converted by the platform's frame reader: Media3's
+   * FrameExtractor tone-maps it, as `thumbnail` does; on iOS AVAssetImageGenerator converts it).
+   * Within `toleranceMs` the nearest keyframe is taken instead of the exact frame. A time that
+   * can't be decoded is left out; rejects when the file has no video, can't be opened, or no
+   * frame decoded.
    */
   frames(uri: string, options: FramesOptions): Promise<Frame[]>;
 

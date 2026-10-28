@@ -98,32 +98,38 @@ enum FrameGrab {
     let times = order.map { time(options.timesMs[$0], in: range, frame: frame) }
     var out = [Frame?](repeating: nil, count: times.count)
     var answered = [Bool](repeating: false, count: times.count)
+    var lastError: Error?
     func keep(_ k: Int, _ upright: CGImage, _ actual: CMTime) {
       let i = order[k]
       let image = scaled(upright, maxWidth: options.maxWidth, maxHeight: options.maxHeight)
-      guard let data = try? jpegBuffer(image, quality) else { return }
+      guard let data = try? jpegBuffer(image, quality) else {
+        lastError = MergeError.failed("Couldn't encode the frame.")
+        return
+      }
       out[i] = Frame(
         timeMs: options.timesMs[i], actualMs: Probe.ms(actual - range.start),
         width: Double(image.width), height: Double(image.height), data: data)
     }
-    if #available(iOS 16, *) {
-      for await result in generator.images(for: times) {
-        // The first time not answered yet that this result is for (times clamped to the video's
-        // end can repeat).
-        guard let k = times.indices.first(where: { !answered[$0] && times[$0] == result.requestedTime })
-        else { continue }
-        answered[k] = true
-        guard let image = try? result.image else { continue }
-        keep(k, image, (try? result.actualTime) ?? times[k])
-      }
-    } else {
-      for k in times.indices {
-        var actual = CMTime.zero
-        guard let image = try? generator.copyCGImage(at: times[k], actualTime: &actual) else { continue }
-        keep(k, image, actual)
+    // The pod builds for React Native's minimum; the app's (16.4) always has the batch API.
+    guard #available(iOS 16, *) else { throw MergeError.invalid("Frames need iOS 16 or later.") }
+    for await result in generator.images(for: times) {
+      // The first time not answered yet that this result is for (times clamped to the video's
+      // end can repeat).
+      guard let k = times.indices.first(where: { !answered[$0] && times[$0] == result.requestedTime })
+      else { continue }
+      answered[k] = true
+      do {
+        keep(k, try result.image, (try? result.actualTime) ?? times[k])
+      } catch {
+        lastError = error
       }
     }
-    return out.compactMap { $0 }
+    let got = out.compactMap { $0 }
+    if got.isEmpty && !times.isEmpty {
+      let why = lastError.map { ": \($0.localizedDescription)" } ?? "."
+      throw MergeError.failed("Couldn't decode any frame of the file\(why)")
+    }
+    return got
   }
 
   /// `ms` (from the video's start) as a time inside it: past the last frame is the last frame.

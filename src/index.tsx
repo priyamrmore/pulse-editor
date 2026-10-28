@@ -130,13 +130,21 @@ export function frames(
   if (!uri?.trim().length) {
     return Promise.reject(new Error('File path cannot be empty.'));
   }
+  // Defaults for what's left out or passed as undefined (a spread would keep the undefined).
   const full: FramesOptions = {
-    maxWidth: 0,
-    maxHeight: 0,
-    quality: 0.7,
-    toleranceMs: 0,
-    ...options,
+    timesMs: options.timesMs,
+    maxWidth: options.maxWidth ?? 0,
+    maxHeight: options.maxHeight ?? 0,
+    quality: options.quality ?? 0.7,
+    toleranceMs: options.toleranceMs ?? 0,
   };
+  if (!full.timesMs.every(Number.isFinite)) {
+    return Promise.reject(new Error('Frame times must be finite numbers.'));
+  }
+  const { maxWidth, maxHeight, quality, toleranceMs } = full;
+  if (![maxWidth, maxHeight, quality, toleranceMs].every(Number.isFinite)) {
+    return Promise.reject(new Error('Frame options must be finite numbers.'));
+  }
   return editor.frames(uri, full).catch((e) => {
     throw nativeError(e);
   });
