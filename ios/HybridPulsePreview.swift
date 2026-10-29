@@ -48,6 +48,8 @@ final class HybridPulsePreview: HybridPulsePreviewSpec {
 
   // Seeks (main thread only).
   private var chaseTime = CMTime.invalid
+  /// A chase seek is in flight on the player (until its frame is shown). Cleared as it lands,
+  /// before anything else runs, so no path can leave it set with seeks waiting.
   private var seeking = false
   private var scrubbing = false
   private var seekStart = 0.0
@@ -68,6 +70,8 @@ final class HybridPulsePreview: HybridPulsePreviewSpec {
   /// Where a swap is putting the new item, until its seek lands: the time to report and to swap
   /// the next edit in at (the new item reads 0 until then).
   private var swapTarget: CMTime?
+  /// Play once the swap lands: it was playing when the edit came in, and nothing paused it since.
+  private var resumeAfterSwap = false
 
   override init() {
     super.init()
@@ -147,7 +151,9 @@ final class HybridPulsePreview: HybridPulsePreviewSpec {
     let first = player.currentItem == nil
     let now = swapTarget ?? player.currentTime()
     let at = first ? CMTime.zero : CMTimeMinimum(now, CMTime(value: CMTimeValue(max(0, durationMs - 1)), timescale: 1000))
-    let wasPlaying = player.timeControlStatus == .playing
+    // An edit during a swap: the player isn't playing the new item yet, the swap before resumes.
+    let wasPlaying = player.timeControlStatus == .playing || resumeAfterSwap
+    resumeAfterSwap = wasPlaying
     statusObservation = item.observe(\.status) { [weak self] item, _ in
       DispatchQueue.main.async {
         guard let self, item.status == .failed else { return }
@@ -179,17 +185,19 @@ final class HybridPulsePreview: HybridPulsePreviewSpec {
     player.seek(to: at, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
       DispatchQueue.main.async {
         guard let self, self.player.currentItem === item else { return }
+        let resume = self.resumeAfterSwap
+        self.resumeAfterSwap = false
         // The edit is in at the same time: say so (until now the new item read 0), unless a seek
         // came in meanwhile (it reports its own frame).
         if self.swapTarget != nil {
           self.swapTarget = nil
-          self.onTime(Self.ms(self.player.currentTime()), wasPlaying)
+          self.onTime(Self.ms(self.player.currentTime()), resume || self.player.timeControlStatus == .playing)
         }
         self.pendingSwap?.seeked = true
         self.finishSwapIfShown()
         // A seek asked for while the swap landed waited for it: run it now.
         if !self.waiters.isEmpty && !self.seeking { self.seekToChaseTime() }
-        if wasPlaying { self.player.play() }
+        if resume { self.player.play() }
       }
     }
   }
@@ -246,7 +254,10 @@ final class HybridPulsePreview: HybridPulsePreviewSpec {
   private static let coldLead = CMTime(value: 160, timescale: 1000)
 
   func pause() throws {
-    DispatchQueue.main.async { self.player.pause() }
+    DispatchQueue.main.async {
+      self.resumeAfterSwap = false
+      self.player.pause()
+    }
   }
 
   func seek(timeMs: Double) throws -> Promise<Double> {
@@ -285,8 +296,8 @@ final class HybridPulsePreview: HybridPulsePreviewSpec {
         guard let self else { return }
         let landedMs = Self.ms(self.player.currentTime())
         self.whenShown(after: before, from: fromMs, to: landedMs) {
+          self.seeking = false
           if CMTimeCompare(target, self.chaseTime) == 0 {
-            self.seeking = false
             self.lastSeekMs = (CACurrentMediaTime() - self.seekStart) * 1000
             self.finishSeeks(Self.ms(self.player.currentTime()))
           } else {
@@ -339,11 +350,12 @@ final class HybridPulsePreview: HybridPulsePreviewSpec {
 
   func setScrubbing(scrubbing: Bool) throws {
     DispatchQueue.main.async {
+      let wasScrubbing = self.scrubbing
       self.scrubbing = scrubbing
       // Count the frames a drag shows, as playback does.
       if scrubbing { self.startCounting() } else if self.player.timeControlStatus != .playing { self.stopCounting() }
       // Letting go: finish on the exact frame.
-      if !scrubbing, self.chaseTime.isValid, !self.seeking { self.seekToChaseTime() }
+      if wasScrubbing, !scrubbing, self.chaseTime.isValid, !self.seeking { self.seekToChaseTime() }
     }
   }
 
