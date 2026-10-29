@@ -25,6 +25,10 @@ class PulseEditor : HybridPulseEditorSpec() {
     return Promise.async { FrameGrab.run(context(), uri, options) }
   }
 
+  override fun frames(uri: String, options: FramesOptions): Promise<Array<Frame>> {
+    return Promise.async { FrameGrab.frames(context(), uri, options) }
+  }
+
   override fun createMerge(clips: Array<MergeClip>, options: MergeOptions): HybridMergeJobSpec =
     com.margelo.nitro.pulseeditor.merge.MergeJob(clips, options)
 

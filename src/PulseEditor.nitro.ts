@@ -151,6 +151,32 @@ export interface Thumbnail {
   timeMs: number;
 }
 
+/** Which frames `frames` takes, how big, and how close to the times asked. */
+export interface FramesOptions {
+  /** Source times in ms, in any order (each clamped to the video). */
+  timesMs: number[];
+  /** Each picture is scaled down to fit inside maxWidth × maxHeight, never up. 0 = no limit. */
+  maxWidth: number;
+  maxHeight: number;
+  /** JPEG quality, 0–1. */
+  quality: number;
+  /** How far from its time a frame may come, ms: within it the nearest keyframe is taken, which
+   * skips decoding the frames between. 0 = the exact frame. */
+  toleranceMs: number;
+}
+
+/** One frame from `frames`, as JPEG bytes. */
+export interface Frame {
+  /** The time it was asked for, ms (as passed). */
+  timeMs: number;
+  /** When the frame shown starts in the source, ms. */
+  actualMs: number;
+  width: number;
+  height: number;
+  /** The JPEG file's bytes. */
+  data: ArrayBuffer;
+}
+
 /** A file's audio as 16-bit signed little-endian mono PCM. */
 export interface AudioPCM {
   /** The samples; empty when the file has no audio track. */
@@ -333,6 +359,17 @@ export interface PulseEditor extends HybridObject<{
    * video or can't be decoded.
    */
   thumbnail(uri: string, options: ThumbnailOptions): Promise<Thumbnail>;
+
+  /**
+   * Several frames of one file as JPEG bytes, in the order asked, from one decoder (a timeline's
+   * filmstrip): the file's own pictures, upright and unedited (the caller draws an edit on them),
+   * as 8-bit SDR JPEGs (an HDR source is converted by the platform's frame reader: Media3's
+   * FrameExtractor tone-maps it, as `thumbnail` does; on iOS AVAssetImageGenerator converts it).
+   * Within `toleranceMs` the nearest keyframe is taken instead of the exact frame. A time that
+   * can't be decoded is left out; rejects when the file has no video, can't be opened, or no
+   * frame decoded.
+   */
+  frames(uri: string, options: FramesOptions): Promise<Frame[]>;
 
   /** Prepare a merge of `clips`, in order, applying each clip's edit. Call `start` to run it. */
   createMerge(clips: MergeClip[], options: MergeOptions): MergeJob;

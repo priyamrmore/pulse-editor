@@ -44,6 +44,10 @@ abstract class HybridPulseEditorSpec: HybridObject() {
   
   @DoNotStrip
   @Keep
+  abstract fun frames(uri: String, options: FramesOptions): Promise<Array<Frame>>
+  
+  @DoNotStrip
+  @Keep
   abstract fun createMerge(clips: Array<MergeClip>, options: MergeOptions): HybridMergeJobSpec
   
   @DoNotStrip

@@ -12,13 +12,16 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.ScaleAndRotateTransformation
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.inspector.frame.FrameExtractor
+import com.margelo.nitro.core.ArrayBuffer
 import com.margelo.nitro.pulseeditor.merge.Merge
 import com.margelo.nitro.pulseeditor.merge.MergeException
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.sync.Mutex
@@ -37,8 +40,10 @@ import kotlinx.coroutines.withContext
  * call built and closed one), so covers of the same clip — a cover picker, a strip — pay a seek
  * instead. Its effects don't depend on the edit (only the mirror flip and a size bound), which is
  * what lets the same instance serve every edit; a warm extractor whose effects changed per call
- * returned the previous request's frame. The item carries the file's size and modification time:
- * a file rewritten at the same path is a new item, so the player can't serve the old file's frame.
+ * returned the previous request's frame. The item's id carries the file's size and modification
+ * time (a file rewritten at the same path is a new item, so the player can't serve the old file's
+ * frame) and the effects (the shared player only prepares again for a new item; with the same one
+ * it seeks, and a seek to a frame it just extracted returns that frame, at the old effects).
  */
 @OptIn(UnstableApi::class)
 internal object FrameGrab {
@@ -48,6 +53,9 @@ internal object FrameGrab {
   private const val MAX_FRAME_SIDE = 1920
   /** How long the last source's extractor is kept after a cover. */
   private const val WARM_MS = 4000L
+  /** `frames` stops after this many failures in a row: the file won't decode, and each try
+   * costs a seek. */
+  private const val MAX_FAILURES_IN_A_ROW = 3
 
   private class Warm(val key: String, val extractor: FrameExtractor)
 
@@ -61,39 +69,7 @@ internal object FrameGrab {
 
   suspend fun run(context: Context, uri: String, options: ThumbnailOptions): Thumbnail = oneAtATime.withLock {
     Merge.removeStaleOutputs(context)
-    val source = Probe.read(context, uri)
-    val video = source.video ?: throw MergeException("The file has no video.")
-
-    // Inside the video: a time past its last frame takes the last frame.
-    val frameMs = if (video.fps > 0) 1000 / video.fps else 1000 / 30.0
-    val lengthMs = if (video.durationMs > 0) video.durationMs else source.durationMs
-    val timeMs = min(max(0.0, options.timeMs), max(0.0, lengthMs - frameMs)).roundToLong()
-
-    val (boundW, boundH) = boundedSize(video)
-    val identity = "$uri|${fileStamp(uri)}"
-    val key = "$identity|${video.mirrored}|${boundW}x$boundH"
-    val frame = withContext(Dispatchers.Main) {
-      main.removeCallbacks(release)
-      val w = warm?.takeIf { it.key == key } ?: run {
-        closeWarm()
-        val effects = mutableListOf<Effect>()
-        if (video.mirrored) effects += ScaleAndRotateTransformation.Builder().setScale(-1f, 1f).build()
-        effects += Presentation.createForWidthAndHeight(boundW, boundH, Presentation.LAYOUT_SCALE_TO_FIT)
-        val item = MediaItem.Builder().setUri(mediaUri(uri)).setMediaId(identity).build()
-        Warm(key, FrameExtractor.Builder(context, item).setEffects(effects).build())
-          .also { warm = it }
-      }
-      try {
-        w.extractor.getFrame(timeMs).await()
-      } catch (e: Throwable) {
-        closeWarm()
-        throw e
-      } finally {
-        if (warm != null) main.postDelayed(release, WARM_MS)
-      }
-    }
-
-    val bitmap = withContext(Dispatchers.Default) { edited(frame.bitmap, options) }
+    val (bitmap, presentationMs) = grab(context, uri, options)
     val file = Merge.outputFile(context, "frame", "jpg")
     withContext(Dispatchers.IO) {
       file.parentFile?.mkdirs()
@@ -108,8 +84,110 @@ internal object FrameGrab {
       uri = Uri.fromFile(file).toString(),
       width = bitmap.width.toDouble(),
       height = bitmap.height.toDouble(),
-      timeMs = frame.presentationTimeMs.toDouble(),
+      timeMs = presentationMs,
     )
+  }
+
+  /**
+   * Several frames as JPEG bytes, in the order asked: the file's own pictures, upright and
+   * unedited, from the warm extractor (taken in source order, so its seeks run forward), the file
+   * probed once. Within `toleranceMs` the player takes the nearest keyframe (seek parameters)
+   * instead of decoding up to the exact frame. A time that can't be decoded is left out and the rest
+   * still come, until [MAX_FAILURES_IN_A_ROW] fail in a row; rejects if no frame decoded.
+   */
+  suspend fun frames(context: Context, uri: String, options: FramesOptions): Array<Frame> = oneAtATime.withLock {
+    val source = Probe.read(context, uri)
+    if (source.video == null) throw MergeException("The file has no video.")
+    val order = options.timesMs.indices.sortedBy { options.timesMs[it] }
+    val out = arrayOfNulls<Frame>(options.timesMs.size)
+    val quality = (options.quality.coerceIn(0.0, 1.0) * 100).roundToInt()
+    val toleranceMs = max(0.0, options.toleranceMs)
+    var failures = 0
+    var lastError: Exception? = null
+    for (i in order) {
+      if (failures >= MAX_FAILURES_IN_A_ROW) break
+      val one = ThumbnailOptions(
+        options.timesMs[i], options.maxWidth, options.maxHeight, options.quality, 0.0, false, null)
+      try {
+        val (bitmap, presentationMs) = grab(context, uri, one, source, toleranceMs)
+        val bytes = withContext(Dispatchers.Default) {
+          java.io.ByteArrayOutputStream().use { buf ->
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, quality, buf)) {
+              throw MergeException("Couldn't encode the frame.")
+            }
+            buf.toByteArray()
+          }
+        }
+        out[i] = Frame(
+          options.timesMs[i], presentationMs, bitmap.width.toDouble(), bitmap.height.toDouble(),
+          ArrayBuffer.copy(bytes))
+        failures = 0
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        // Left out: the caller keeps its nearest frame.
+        failures++
+        lastError = e
+      }
+    }
+    val got = out.filterNotNull()
+    if (got.isEmpty() && lastError != null) {
+      throw MergeException("Couldn't decode any frame of the file: ${lastError.message}")
+    }
+    got.toTypedArray()
+  }
+
+  /** The frame at `options.timeMs`, with the edit drawn, and when it starts (ms). Callers hold
+   * `oneAtATime`. A filmstrip passes its probe (`source`), and its frames are extracted at the
+   * size asked (unedited, nothing to crop) rather than at [MAX_FRAME_SIDE], within `toleranceMs`
+   * (0: the exact frame). */
+  private suspend fun grab(
+    context: Context,
+    uri: String,
+    options: ThumbnailOptions,
+    source: ProbeResult? = null,
+    toleranceMs: Double = 0.0,
+  ): Pair<Bitmap, Double> {
+    val probed = source ?: Probe.read(context, uri)
+    val video = probed.video ?: throw MergeException("The file has no video.")
+
+    // Inside the video: a time past its last frame takes the last frame.
+    val frameMs = if (video.fps > 0) 1000 / video.fps else 1000 / 30.0
+    val lengthMs = if (video.durationMs > 0) video.durationMs else probed.durationMs
+    val timeMs = min(max(0.0, options.timeMs), max(0.0, lengthMs - frameMs)).roundToLong()
+
+    val (boundW, boundH) = boundedSize(video).let { (w, h) ->
+      if (source != null) fitted(w.toDouble(), h.toDouble(), options.maxWidth, options.maxHeight) else w to h
+    }
+    // The item: the file as it is now, with the effects (see the class comment). The extractor:
+    // that item, at these seek parameters.
+    val itemId = "$uri|${fileStamp(uri)}|${video.mirrored}|${boundW}x$boundH"
+    val toleranceUs = (toleranceMs * 1000).roundToLong()
+    val key = "$itemId|$toleranceUs"
+    val frame = withContext(Dispatchers.Main) {
+      main.removeCallbacks(release)
+      val w = warm?.takeIf { it.key == key } ?: run {
+        closeWarm()
+        val effects = mutableListOf<Effect>()
+        if (video.mirrored) effects += ScaleAndRotateTransformation.Builder().setScale(-1f, 1f).build()
+        effects += Presentation.createForWidthAndHeight(boundW, boundH, Presentation.LAYOUT_SCALE_TO_FIT)
+        val item = MediaItem.Builder().setUri(mediaUri(uri)).setMediaId(itemId).build()
+        val seek = if (toleranceUs > 0) SeekParameters(toleranceUs, toleranceUs) else SeekParameters.EXACT
+        Warm(key, FrameExtractor.Builder(context, item).setEffects(effects).setSeekParameters(seek).build())
+          .also { warm = it }
+      }
+      try {
+        w.extractor.getFrame(timeMs).await()
+      } catch (e: Throwable) {
+        closeWarm()
+        throw e
+      } finally {
+        if (warm != null) main.postDelayed(release, WARM_MS)
+      }
+    }
+
+    val bitmap = withContext(Dispatchers.Default) { edited(frame.bitmap, options) }
+    return bitmap to frame.presentationTimeMs.toDouble()
   }
 
   /** A local file's size and modification time (empty for other URIs). */

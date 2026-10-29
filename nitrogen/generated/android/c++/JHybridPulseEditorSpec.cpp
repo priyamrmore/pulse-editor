@@ -19,6 +19,8 @@ namespace margelo::nitro::pulseeditor { struct ProbeAudio; }
 namespace margelo::nitro::pulseeditor { struct AudioPCM; }
 // Forward declaration of `Thumbnail` to properly resolve imports.
 namespace margelo::nitro::pulseeditor { struct Thumbnail; }
+// Forward declaration of `Frame` to properly resolve imports.
+namespace margelo::nitro::pulseeditor { struct Frame; }
 // Forward declaration of `HybridMergeJobSpec` to properly resolve imports.
 namespace margelo::nitro::pulseeditor { class HybridMergeJobSpec; }
 // Forward declaration of `HybridConformJobSpec` to properly resolve imports.
@@ -29,6 +31,8 @@ namespace margelo::nitro::pulseeditor { class HybridSeekBenchSpec; }
 namespace margelo::nitro::pulseeditor { struct ThumbnailOptions; }
 // Forward declaration of `MergeCrop` to properly resolve imports.
 namespace margelo::nitro::pulseeditor { struct MergeCrop; }
+// Forward declaration of `FramesOptions` to properly resolve imports.
+namespace margelo::nitro::pulseeditor { struct FramesOptions; }
 // Forward declaration of `MergeClip` to properly resolve imports.
 namespace margelo::nitro::pulseeditor { struct MergeClip; }
 // Forward declaration of `MergeOptions` to properly resolve imports.
@@ -56,6 +60,9 @@ namespace margelo::nitro::pulseeditor { struct ConformOptions; }
 #include <NitroModules/JArrayBuffer.hpp>
 #include "Thumbnail.hpp"
 #include "JThumbnail.hpp"
+#include "Frame.hpp"
+#include <vector>
+#include "JFrame.hpp"
 #include <memory>
 #include "HybridMergeJobSpec.hpp"
 #include "JHybridMergeJobSpec.hpp"
@@ -67,8 +74,9 @@ namespace margelo::nitro::pulseeditor { struct ConformOptions; }
 #include "JThumbnailOptions.hpp"
 #include "MergeCrop.hpp"
 #include "JMergeCrop.hpp"
+#include "FramesOptions.hpp"
+#include "JFramesOptions.hpp"
 #include "MergeClip.hpp"
-#include <vector>
 #include "JMergeClip.hpp"
 #include "MergeOptions.hpp"
 #include "JMergeOptions.hpp"
@@ -150,6 +158,31 @@ namespace margelo::nitro::pulseeditor {
       __result->cthis()->addOnResolvedListener([=](const jni::alias_ref<jni::JObject>& __boxedResult) {
         auto __result = jni::static_ref_cast<JThumbnail>(__boxedResult);
         __promise->resolve(__result->toCpp());
+      });
+      __result->cthis()->addOnRejectedListener([=](const jni::alias_ref<jni::JThrowable>& __throwable) {
+        jni::JniException __jniError(__throwable);
+        __promise->reject(std::make_exception_ptr(__jniError));
+      });
+      return __promise;
+    }();
+  }
+  std::shared_ptr<Promise<std::vector<Frame>>> JHybridPulseEditorSpec::frames(const std::string& uri, const FramesOptions& options) {
+    static const auto method = _javaPart->javaClassStatic()->getMethod<jni::local_ref<JPromise::javaobject>(jni::alias_ref<jni::JString> /* uri */, jni::alias_ref<JFramesOptions> /* options */)>("frames");
+    auto __result = method(_javaPart, jni::make_jstring(uri), JFramesOptions::fromCpp(options));
+    return [&]() {
+      auto __promise = Promise<std::vector<Frame>>::create();
+      __result->cthis()->addOnResolvedListener([=](const jni::alias_ref<jni::JObject>& __boxedResult) {
+        auto __result = jni::static_ref_cast<jni::JArrayClass<JFrame>>(__boxedResult);
+        __promise->resolve([&](auto&& __input) {
+          size_t __size = __input->size();
+          std::vector<Frame> __vector;
+          __vector.reserve(__size);
+          for (size_t __i = 0; __i < __size; __i++) {
+            auto __element = __input->getElement(__i);
+            __vector.push_back(__element->toCpp());
+          }
+          return __vector;
+        }(__result));
       });
       __result->cthis()->addOnRejectedListener([=](const jni::alias_ref<jni::JThrowable>& __throwable) {
         jni::JniException __jniError(__throwable);

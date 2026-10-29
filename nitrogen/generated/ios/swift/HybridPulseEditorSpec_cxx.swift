@@ -182,6 +182,31 @@ open class HybridPulseEditorSpec_cxx {
   }
   
   @inline(__always)
+  public final func frames(uri: std.string, options: FramesOptions) -> bridge.Result_std__shared_ptr_Promise_std__vector_Frame____ {
+    do {
+      let __result = try self.__implementation.frames(uri: String(uri), options: options)
+      let __resultCpp = { () -> bridge.std__shared_ptr_Promise_std__vector_Frame___ in
+        let __promise = bridge.create_std__shared_ptr_Promise_std__vector_Frame___()
+        let __promiseHolder = bridge.wrap_std__shared_ptr_Promise_std__vector_Frame___(__promise)
+        __result
+          .then({ __result in __promiseHolder.resolve({ () -> bridge.std__vector_Frame_ in
+              var __vector = bridge.create_std__vector_Frame_(__result.count)
+              for __item in __result {
+                __vector.push_back(__item)
+              }
+              return __vector
+            }()) })
+          .catch({ __error in __promiseHolder.reject(__error.toCpp()) })
+        return __promise
+      }()
+      return bridge.create_Result_std__shared_ptr_Promise_std__vector_Frame____(__resultCpp)
+    } catch (let __error) {
+      let __exceptionPtr = __error.toCpp()
+      return bridge.create_Result_std__shared_ptr_Promise_std__vector_Frame____(__exceptionPtr)
+    }
+  }
+  
+  @inline(__always)
   public final func createMerge(clips: bridge.std__vector_MergeClip_, options: MergeOptions) -> bridge.Result_std__shared_ptr_HybridMergeJobSpec__ {
     do {
       let __result = try self.__implementation.createMerge(clips: clips.map({ __item in __item }), options: options)

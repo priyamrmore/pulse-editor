@@ -28,6 +28,12 @@ class PulseEditor: HybridPulseEditorSpec {
     }
   }
 
+  public func frames(uri: String, options: FramesOptions) throws -> Promise<[Frame]> {
+    return Promise.async(.userInitiated) {
+      try await withJSError { try await FrameGrab.frames(uri, options) }
+    }
+  }
+
   public func createMerge(clips: [MergeClip], options: MergeOptions) throws -> (any HybridMergeJobSpec) {
     return MergeJob(clips: clips, options: options)
   }

@@ -11,6 +11,8 @@ import type {
   SeekBenchResult,
   Thumbnail,
   ThumbnailOptions,
+  FramesOptions,
+  Frame,
 } from './PulseEditor.nitro';
 
 export type {
@@ -35,6 +37,8 @@ export type {
   Thumbnail,
   ThumbnailOptions,
   Transfer,
+  FramesOptions,
+  Frame,
 } from './PulseEditor.nitro';
 export type { PreviewStats, PreviewStatus } from './PulsePreview.nitro';
 export {
@@ -109,6 +113,39 @@ export function thumbnail(
     ...options,
   };
   return editor.thumbnail(uri, full).catch((e) => {
+    throw nativeError(e);
+  });
+}
+
+/**
+ * Several frames of one file as JPEG bytes, from one decoder: the file's own pictures, upright and
+ * unedited. With `toleranceMs`, the nearest keyframe within it is taken instead of the exact frame
+ * (much faster for a filmstrip). A time that can't be decoded is left out. Defaults: no size
+ * limit, quality 0.7, exact frames.
+ */
+export function frames(
+  uri: string,
+  options: Partial<FramesOptions> & { timesMs: number[] }
+): Promise<Frame[]> {
+  if (!uri?.trim().length) {
+    return Promise.reject(new Error('File path cannot be empty.'));
+  }
+  // Defaults for what's left out or passed as undefined (a spread would keep the undefined).
+  const full: FramesOptions = {
+    timesMs: options.timesMs,
+    maxWidth: options.maxWidth ?? 0,
+    maxHeight: options.maxHeight ?? 0,
+    quality: options.quality ?? 0.7,
+    toleranceMs: options.toleranceMs ?? 0,
+  };
+  if (!full.timesMs.every(Number.isFinite)) {
+    return Promise.reject(new Error('Frame times must be finite numbers.'));
+  }
+  const { maxWidth, maxHeight, quality, toleranceMs } = full;
+  if (![maxWidth, maxHeight, quality, toleranceMs].every(Number.isFinite)) {
+    return Promise.reject(new Error('Frame options must be finite numbers.'));
+  }
+  return editor.frames(uri, full).catch((e) => {
     throw nativeError(e);
   });
 }
