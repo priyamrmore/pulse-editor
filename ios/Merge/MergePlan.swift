@@ -1,10 +1,10 @@
 import Foundation
 
 /// Which path a merge takes.
-/// - join: every clip shares one format that fits the output, and none has a rendered edit.
-/// - selective: the clips share that format, but some have a rotate / flip / crop / speed edit:
-///   only those (and copied clips trimmed at their start) are rendered into the shared format,
-///   then everything joins.
+/// - join: every clip shares one format that fits the output, and none has a rendered edit or a
+///   trimmed start.
+/// - selective: the clips share that format, but some have a rotate / flip / crop / speed edit or
+///   a trimmed start: only those are rendered into the shared format, then everything joins.
 /// - encode: the clips don't share a format that fits: the whole timeline is encoded once.
 struct MergePlan {
   enum Path {
@@ -22,17 +22,17 @@ struct MergePlan {
 
   init(clips: [MergeClip], media: [Probe.Media], options: MergeOptions) {
     let blockers = Self.joinBlockers(media: media, options: options)
-    let render = clips.indices.filter { Self.needsRender(clips[$0]) }
+    // A clip trimmed at its start is rendered too. Copied, it would keep the frames back to its
+    // keyframe, hidden by an edit list: Firefox ignores a video edit list (it shows those frames
+    // and plays the picture behind the sound), and next to rendered clips FFmpeg drops the frames
+    // before each such join (trac #6584).
+    let render = clips.indices.filter { Self.needsRender(clips[$0]) || clips[$0].startMs > 0 }
     if !blockers.isEmpty {
       path = .encode(reasons: blockers)
     } else if render.isEmpty {
       path = .join
     } else {
-      // A copied clip trimmed at its start keeps the frames back to its keyframe, hidden by an edit
-      // list. Next to rendered clips (a second sample description) FFmpeg then drops the frames
-      // before each such join (trac #6584), so those clips are rendered too.
-      let trimmed = clips.indices.filter { !render.contains($0) && clips[$0].startMs > 0 }
-      path = .selective(render: (render + trimmed).sorted())
+      path = .selective(render: render)
     }
   }
 
