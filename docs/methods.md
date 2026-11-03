@@ -148,7 +148,11 @@ Media3 can't mix copied and re-encoded clips in one export, and its copy mode is
     - The output's video edit list starts at 0, and Firefox shows the frame Chrome does.
     - A start trim on the middle clip also renders just that clip, with no edit inside the file.
     - The untrimmed draft still joins.
-  - Not yet run on the iPhone.
+  - **After, iPhone 17 Pro Max** (Debug, Playwright):
+    - Two exports: 3 recordings with the first clip's start trimmed by ~1 s, and with the middle clip's.
+    - Each renders only the trimmed clip, and its video edit list starts at 0.
+    - At every seek, Firefox matches Chrome within 0.2 of the frame difference, and WebKit stays flat.
+    - Against a reference shifted by the trim, both are off (13–48), so neither runs behind.
 - **iOS selective merges, read the way a server re-encode reads them (2026-10-14, iPhone 17 Pro Max, Debug, `ios-ios-wms-1014`, `ios-ios-drift-1014`, `ios-ios-quick-drift-1014`):** copied clips trimmed at their start are now rendered when other clips are, so the file has no pre-roll edits. Decoded by FFmpeg through the edit list, the 20-clip draft's export has 0 errors and 6319 frames, the timeline's count (before: 53 errors, 6305 frames), the 40-clip draft's 0 and 12548 (before: 107, 12516), and the quick pass's `sync-select` 0 (before: 4); every export has one video edit. `sync-select` takes 5.6 s (3.7 s before: its trimmed copied clips are rendered now). A rendered clip whose slot ends inside a frame (a trimmed 2× clip, 100.5 frames) was written a frame long, so every later clip started 16 ms late; it now ends at its slot (`trimedits` export 27.383 s, the timeline's; was 27.400). Preview against export on `trimedits` (trimmed + rotated, 2×, flipped + cropped, ½×): 16 of 20 (was 13), the 4 in the 2× clip. Lip sync on every path unchanged (0.0 / ±0.1 ms; speed −25.0 ms).
 - **Android, on an emulator (Android 17, arm64, software codecs), same fixtures as iOS:**
   - fast join of 3 clips without re-encoding, and with a muted last clip (silent);
