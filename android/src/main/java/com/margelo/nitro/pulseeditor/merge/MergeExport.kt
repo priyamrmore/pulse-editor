@@ -74,16 +74,17 @@ internal object MergeExport {
     // Declare audio only when some clip has sound: muted or silent clips then get silence.
     val hasAudio = pairs.any { (clip, m) -> !clip.muted && m.audio != null }
     val builder = if (join) {
-      // One sequence, video copied, audio encoded: copied AAC keeps each source's end padding,
-      // which can't be cut mid-frame, so every clip would push the next clip's audio later.
-      val trackTypes = if (hasAudio) setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO) else setOf(C.TRACK_TYPE_VIDEO)
-      val items = pairs.map { (clip, m) ->
-        EditedMediaItem.Builder(clippedItem(clip, m))
-          .setRemoveAudio(clip.muted)
-          .setEffects(Effects(audioChain(clip, m, options), emptyList()))
-          .build()
-      }
-      Composition.Builder(EditedMediaItemSequence.Builder(trackTypes).addItems(items).build()).setTransmuxVideo(true)
+      // Video copied in its own sequence, audio encoded in a parallel one (copied AAC keeps each
+      // source's end padding, which can't be cut mid-frame, so every clip would push the next
+      // clip's audio later). Not one sequence carrying both: Media3 then reads both tracks
+      // through one player, and its copied-video exporter holds at most ~2 MB while the muxer
+      // waits for the audio encoder's first output. High-bitrate video (a Galaxy S24's back
+      // camera peaks near 12 Mbps) fills that first, the player stops, the audio never arrives,
+      // and the export is aborted after 10 s with no sample written.
+      val video = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_VIDEO))
+        .addItems(pairs.map { (clip, m) -> EditedMediaItem.Builder(clippedItem(clip, m)).setRemoveAudio(true).build() })
+        .build()
+      Composition.Builder(listOfNotNull(video, if (hasAudio) audioSequence(pairs, options) else null)).setTransmuxVideo(true)
     } else {
       // Video and audio in parallel sequences: the video clipped frame-accurately by Media3, the
       // audio read from each file's start and cut by TrimAudioProcessor (Media3's clipping lands
@@ -91,21 +92,24 @@ internal object MergeExport {
       val video = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_VIDEO))
         .addItems(pairs.map { (clip, m) -> videoItem(clip, m, options) })
         .build()
-      val sequences = mutableListOf(video)
-      if (hasAudio) {
-        val audio = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
-        for ((clip, m) in pairs) {
-          if (clip.muted || m.audio == null) audio.addGap((MergePlan.timelineMs(clip, m) * 1000).roundToLong())
-          else audio.addItem(audioItem(clip, m, options))
-        }
-        sequences += audio.build()
-      }
-      Composition.Builder(sequences).apply {
+      Composition.Builder(listOfNotNull(video, if (hasAudio) audioSequence(pairs, options) else null)).apply {
         // HDR sources are tone-mapped to SDR (inputs are normally conformed to SDR already).
         if (media.any { it.video?.transfer != null && it.video?.transfer != Transfer.SDR }) setHdrMode(hdrMode)
       }
     }
     return builder.build()
+  }
+
+  /** The timeline's sound, for the join and the encode alike: each clip's audio read from its
+   * file's start and cut by TrimAudioProcessor (Media3's clipping lands audio late, see there);
+   * muted and silent clips are gaps of silence. */
+  private fun audioSequence(pairs: List<Pair<MergeClip, ProbeResult>>, options: MergeOptions): EditedMediaItemSequence {
+    val audio = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
+    for ((clip, m) in pairs) {
+      if (clip.muted || m.audio == null) audio.addGap((MergePlan.timelineMs(clip, m) * 1000).roundToLong())
+      else audio.addItem(audioItem(clip, m, options))
+    }
+    return audio.build()
   }
 
   /** A clip's picture: trimmed, retimed, with its geometry, capped at the frame rate. Shared
